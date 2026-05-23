@@ -1,14 +1,50 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys')
 const { Boom } = require('@hapi/boom')
-const path = require('path')
+const { MongoClient } = require('mongodb')
 const pino = require('pino')
+const fs = require('fs')
+const path = require('path')
 
 let sock = null
 let currentQR = null
 let connectionStatus = 'disconnected'
 let messageHandler = null
 
-const SESSION_PATH = process.env.SESSION_PATH || './session'
+const MONGO_URI = process.env.MONGO_URI
+const SESSION_PATH = '/tmp/baileys_session'
+
+async function saveSessionToMongo(sessionPath) {
+  const client = new MongoClient(MONGO_URI)
+  try {
+    await client.connect()
+    const db = client.db('alabendita')
+    const col = db.collection('session')
+    const files = fs.readdirSync(sessionPath)
+    for (const file of files) {
+      const content = fs.readFileSync(path.join(sessionPath, file), 'utf8')
+      await col.updateOne({ _id: file }, { $set: { content } }, { upsert: true })
+    }
+  } finally {
+    await client.close()
+  }
+}
+
+async function loadSessionFromMongo(sessionPath) {
+  const client = new MongoClient(MONGO_URI)
+  try {
+    await client.connect()
+    const db = client.db('alabendita')
+    const col = db.collection('session')
+    const docs = await col.find({}).toArray()
+    if (!fs.existsSync(sessionPath)) fs.mkdirSync(sessionPath, { recursive: true })
+    for (const doc of docs) {
+      fs.writeFileSync(path.join(sessionPath, doc._id), doc.content)
+    }
+    return docs.length > 0
+  } finally {
+    await client.close()
+  }
+}
 
 function getStatus() {
   return { status: connectionStatus, qr: currentQR }
@@ -19,6 +55,7 @@ function setMessageHandler(handler) {
 }
 
 async function connectToWhatsApp() {
+  await loadSessionFromMongo(SESSION_PATH)
   const { state, saveCreds } = await useMultiFileAuthState(SESSION_PATH)
   const { version } = await fetchLatestBaileysVersion()
 
@@ -30,7 +67,10 @@ async function connectToWhatsApp() {
     browser: ['Ala Bendita Bot', 'Chrome', '1.0.0'],
   })
 
-  sock.ev.on('creds.update', saveCreds)
+  sock.ev.on('creds.update', async () => {
+    await saveCreds()
+    await saveSessionToMongo(SESSION_PATH)
+  })
 
   sock.ev.on('connection.update', (update) => {
     const { connection, lastDisconnect, qr } = update
