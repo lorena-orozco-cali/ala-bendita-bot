@@ -1,0 +1,17 @@
+{
+  "name": "ala-bendita-bot",
+  "version": "1.0.0",
+  "description": "Bot WhatsApp Ala Bendita Chicken",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@hapi/boom": "^10.0.1",
+    "@whiskeysockets/baileys": "^6.7.9",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "pino": "^9.3.2",
+    "qrcode": "^1.5.4"
+  }
+}
