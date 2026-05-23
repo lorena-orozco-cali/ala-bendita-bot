@@ -1,4 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys')
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys')
 const { Boom } = require('@hapi/boom')
 const { MongoClient } = require('mongodb')
 const pino = require('pino')
@@ -67,7 +67,7 @@ async function connectToWhatsApp() {
   try {
     await loadSessionFromMongo(SESSION_PATH)
     const { state, saveCreds } = await useMultiFileAuthState(SESSION_PATH)
-    const { version } = await fetchLatestBaileysVersion()
+    const version = [2, 3000, 1015901307]
 
     sock = makeWASocket({
       version,
