@@ -7,10 +7,12 @@
     "start": "node index.js"
   },
   "dependencies": {
+    "@hapi/boom": "^10.0.1",
+    "@whiskeysockets/baileys": "^6.7.9",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "qrcode": "^1.5.4",
-    "whatsapp-web.js": "^1.23.0",
-    "puppeteer": "^21.0.0"
+    "mongodb": "^6.3.0",
+    "pino": "^9.3.2",
+    "qrcode": "^1.5.4"
   }
 }
