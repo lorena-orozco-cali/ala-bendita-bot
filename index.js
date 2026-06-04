@@ -1,25 +1,31 @@
 require('dotenv').config()
 const express = require('express')
 const QRCode = require('qrcode')
-
 const { connectToWhatsApp, sendMessage, getStatus, setMessageHandler } = require('./whatsapp')
 
 const app = express()
 app.use(express.json())
 
 const sessions = new Map()
+const ASESOR = process.env.ASESOR_JID || '573104672816@s.whatsapp.net'
 
-const STATES = {
-  MENU: 'MENU',
-  ESPERANDO_NOMBRE: 'ESPERANDO_NOMBRE',
-  ESPERANDO_ITEMS: 'ESPERANDO_ITEMS',
-  ESPERANDO_SALSA: 'ESPERANDO_SALSA',
-  ESPERANDO_DIRECCION: 'ESPERANDO_DIRECCION',
-  ESPERANDO_PAGO: 'ESPERANDO_PAGO',
-  ESPERANDO_COMPROBANTE: 'ESPERANDO_COMPROBANTE',
+const PRODUCTOS = {
+  '1':  { nombre: '6 alitas + papas',       precio: 20000 },
+  '2':  { nombre: '12 alitas + papas',      precio: 36000 },
+  '3':  { nombre: '18 alitas + papas',      precio: 52000 },
+  '4':  { nombre: '24 alitas + papas',      precio: 63000 },
+  '5':  { nombre: '30 alitas + papas',      precio: 70000 },
+  '6':  { nombre: 'Broaster x4 + papas',    precio: 28000 },
+  '7':  { nombre: 'Broaster x8 + papas',    precio: 52000 },
+  '8':  { nombre: 'Broaster con criollas',  precio: 18000 },
+  '9':  { nombre: 'Bandeja mixta salsas',   precio: 36000 },
+  '10': { nombre: 'Papas a la francesa',    precio: 7000  },
+  '11': { nombre: 'Salchipapa',             precio: 9000  },
 }
 
-const MENU_MSG = `🍗 *MENÚ ALA BENDITA CHICKEN* 🍗
+const SALSAS = ['BBQ', 'BBQ Picante', 'Miel Mostaza', 'Teriyaki', 'Chile Dulce', 'Apanadas']
+
+const MENU = `🍗 *MENÚ ALA BENDITA CHICKEN* 🍗
 
 *ALITAS + PAPAS A LA FRANCESA:*
 1️⃣  6 alitas  → $20.000
@@ -28,216 +34,169 @@ const MENU_MSG = `🍗 *MENÚ ALA BENDITA CHICKEN* 🍗
 4️⃣  24 alitas → $63.000
 5️⃣  30 alitas → $70.000
 
-*SALSAS DISPONIBLES:*
-🍖 BBQ · 🌶️ BBQ Picante · 🍯 Miel Mostaza
-🫙 Teriyaki · 🍬 Chile Dulce · ⚪ Apanadas
-
 *OTROS PRODUCTOS:*
-🍖 Broaster x4 presas + papas → $28.000
-🍗 Broaster x8 presas + papas → $52.000
-🍗 Broaster con criollas → $18.000
-🥘 Bandeja mixta salsas → $36.000
-🍟 Papas a la francesa → $7.000
-🌭 Salchipapa → $9.000
+6️⃣  Broaster x4 presas + papas → $28.000
+7️⃣  Broaster x8 presas + papas → $52.000
+8️⃣  Broaster con criollas → $18.000
+9️⃣  Bandeja mixta salsas → $36.000
+🔟  Papas a la francesa → $7.000
+1️⃣1️⃣ Salchipapa → $9.000
 
-🛵 *DOMICILIO GRATIS* sur de Cali
-⏰ Horario: 4pm - 11pm todos los días
-💳 Efectivo · Nequi · Transferencias`
+Escribe el *número* del producto que quieres pedir 😊`
 
-const BIENVENIDA = `¡Hola! 👋 Bienvenido a *Ala Bendita Chicken* 🍗
-
-¿Qué deseas hacer?
-
-1️⃣ Ver el menú
-2️⃣ Hacer un pedido
-3️⃣ Hablar con un asesor
-4️⃣ Información (zonas, horario, pago)
-
-Responde con el número 😊`
+function fmt(n) {
+  return '$' + n.toLocaleString('es-CO')
+}
 
 function getSession(jid) {
-  if (!sessions.has(jid)) sessions.set(jid, { state: STATES.MENU, pedido: { items: [], nombre: '', direccion: '', pago: '' } })
+  if (!sessions.has(jid)) {
+    sessions.set(jid, {
+      step: 'inicio',
+      pedido: [],
+      nombre: '',
+      direccion: '',
+      pago: '',
+      salsa: ''
+    })
+  }
   return sessions.get(jid)
 }
 
-function setSession(jid, data) {
-  sessions.set(jid, { ...getSession(jid), ...data })
-}
-
-function detectarSalsa(t) {
-  if (t.includes('picante')) return 'BBQ Picante'
-  if (t.includes('miel') || t.includes('mostaza')) return 'Miel Mostaza'
-  if (t.includes('teriyaki')) return 'Teriyaki'
-  if (t.includes('chile')) return 'Chile Dulce'
-  if (t.includes('apanada') || t.includes('sin salsa')) return 'Apanadas'
-  return 'BBQ'
-}
-
-function generarComanda(jid) {
-  const session = getSession(jid)
-  const p = session.pedido
-  const now = new Date()
-  const hora = now.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })
-  const fecha = now.toLocaleDateString('es-CO')
-  let total = 0
-  let items = ''
-  p.items.forEach(it => {
-    total += it.precio
-    items += `• ${it.nombre} → $${it.precio.toLocaleString('es-CO')}\n`
-  })
-  return `════════════════════════════\n🍗 *ALA BENDITA CHICKEN*\n════════════════════════════\n📅 ${fecha} ⏰ ${hora}\n👤 ${p.nombre}\n📞 ${jid.replace('@s.whatsapp.net', '')}\n────────────────────────────\n${items}────────────────────────────\n💰 *TOTAL: $${total.toLocaleString('es-CO')}*\n📍 ${p.direccion}\n💳 ${p.pago}\n════════════════════════════\n🛵 DOMICILIO GRATIS · SUR CALI`
-}
-
 async function handleMessage(jid, texto, hasMedia) {
-  const t = (texto || '').trim().toLowerCase()
-  const session = getSession(jid)
-  const owners = (process.env.OWNER_NUMBERS || '').split(',').filter(Boolean)
+  const s = getSession(jid)
+  const txt = texto.trim()
+  const lower = txt.toLowerCase()
 
-  // ESTADOS ACTIVOS DEL FLUJO
-
-  if (session.state === STATES.ESPERANDO_NOMBRE) {
-    setSession(jid, { state: STATES.ESPERANDO_ITEMS, pedido: { ...session.pedido, nombre: texto.trim(), items: [] } })
-    await sendMessage(jid, `Hola *${texto.trim()}* 😊\n\n${MENU_MSG}\n\nEscríbeme qué quieres. Ejemplo:\n_"12 alitas bbq"_\n_"6 alitas miel mostaza"_\n_"broaster x4"_\n\nCuando termines escribe *listo* ✅`)
+  // Reinicio siempre disponible
+  if (['menu', 'menú', 'inicio', 'reiniciar', 'cancelar', 'hola', 'buenas', 'buenos días', 'buenas tardes', 'buenas noches'].includes(lower)) {
+    sessions.set(jid, { step: 'menu', pedido: [], nombre: '', direccion: '', pago: '', salsa: '' })
+    await sendMessage(jid, `¡Hola! 👋 Bienvenido a *Ala Bendita Chicken* 🍗\n\n${MENU}`)
     return
   }
 
-  if (session.state === STATES.ESPERANDO_ITEMS) {
-    if (t === 'listo' || t === 'es todo' || t === 'eso es todo') {
-      if (session.pedido.items.length === 0) {
-        await sendMessage(jid, `No has agregado nada aún 😅\nDime qué quieres pedir 🍗`)
-        return
-      }
-      setSession(jid, { state: STATES.ESPERANDO_DIRECCION })
-      let resumen = `✅ *Tu pedido:*\n\n`
-      let total = 0
-      session.pedido.items.forEach(it => { resumen += `• ${it.nombre}\n`; total += it.precio })
-      resumen += `\n💰 *Total: $${total.toLocaleString('es-CO')}*`
-      await sendMessage(jid, resumen)
-      await sendMessage(jid, `¿Cuál es tu *dirección* de entrega? 📍`)
+  if (s.step === 'inicio') {
+    s.step = 'menu'
+    await sendMessage(jid, `¡Hola! 👋 Bienvenido a *Ala Bendita Chicken* 🍗\n\n${MENU}`)
+    return
+  }
+
+  if (s.step === 'menu') {
+    const prod = PRODUCTOS[txt]
+    if (!prod) {
+      await sendMessage(jid, `Por favor escribe el *número* del producto del menú 👆\nEjemplo: *1* para 6 alitas`)
       return
     }
+    s.pedido.push({ ...prod, cantidad: 1 })
+    s.step = 'salsa'
+    await sendMessage(jid, `Perfecto, anotado: *${prod.nombre}* 🍗\n\n¿Qué salsa prefieres?\n\n🍖 BBQ\n🌶️ BBQ Picante\n🍯 Miel Mostaza\n🫙 Teriyaki\n🍬 Chile Dulce\n⚪ Apanadas\n\nEscribe el nombre de la salsa 👇`)
+    return
+  }
 
-    let agregado = false
-    const salsa = detectarSalsa(t)
-    const items = [...session.pedido.items]
+  if (s.step === 'salsa') {
+    s.salsa = txt
+    s.step = 'mas_productos'
+    await sendMessage(jid, `Salsa *${txt}* anotada ✅\n\n¿Deseas agregar algo más?\n\n${MENU}\n\nO escribe *listo* para continuar con tu pedido 👇`)
+    return
+  }
 
-    if (t.includes('6 alita') || t.includes('seis alita')) { items.push({ nombre: `6 Alitas + Papas (${salsa})`, precio: 20000 }); agregado = true }
-    else if (t.includes('12 alita') || t.includes('doce alita')) { items.push({ nombre: `12 Alitas + Papas (${salsa})`, precio: 36000 }); agregado = true }
-    else if (t.includes('18 alita') || t.includes('dieciocho')) { items.push({ nombre: `18 Alitas + Papas (${salsa})`, precio: 52000 }); agregado = true }
-    else if (t.includes('24 alita') || t.includes('veinticuatro')) { items.push({ nombre: `24 Alitas + Papas (${salsa})`, precio: 63000 }); agregado = true }
-    else if (t.includes('30 alita') || t.includes('treinta')) { items.push({ nombre: `30 Alitas + Papas (${salsa})`, precio: 70000 }); agregado = true }
-    else if (t.includes('broaster') && (t.includes('x8') || t.includes('8 '))) { items.push({ nombre: 'Broaster x8 Presas + Papas', precio: 52000 }); agregado = true }
-    else if (t.includes('broaster') && (t.includes('x4') || t.includes('4 '))) { items.push({ nombre: 'Broaster x4 Presas + Papas', precio: 28000 }); agregado = true }
-    else if (t.includes('broaster') && t.includes('criolla')) { items.push({ nombre: 'Broaster con Criollas', precio: 18000 }); agregado = true }
-    else if (t.includes('bandeja') || t.includes('mixta')) { items.push({ nombre: 'Bandeja Mixta Salsas + Papas', precio: 36000 }); agregado = true }
-    else if (t.includes('salchipapa')) { items.push({ nombre: 'Salchipapa', precio: 9000 }); agregado = true }
-    else if (t.includes('papa') && !t.includes('alita')) { items.push({ nombre: 'Papas a la Francesa', precio: 7000 }); agregado = true }
-
-    if (agregado) {
-      setSession(jid, { pedido: { ...session.pedido, items } })
-      const ultimo = items[items.length - 1]
-      await sendMessage(jid, `✅ *${ultimo.nombre}* → $${ultimo.precio.toLocaleString('es-CO')}\n\n¿Algo más? Escribe *listo* cuando termines 😊`)
+  if (s.step === 'mas_productos') {
+    if (lower === 'listo' || lower === 'no' || lower === 'nada mas' || lower === 'nada más') {
+      s.step = 'nombre'
+      await sendMessage(jid, `¡Perfecto! ¿Cuál es tu nombre? 😊`)
+      return
+    }
+    const prod = PRODUCTOS[txt]
+    if (prod) {
+      s.pedido.push({ ...prod, cantidad: 1 })
+      await sendMessage(jid, `Agregado: *${prod.nombre}* ✅\n\n¿Algo más? Escribe otro número o escribe *listo* para continuar 👇`)
     } else {
-      await sendMessage(jid, `No entendí ese producto 😅\n\nEjemplos:\n_"12 alitas bbq"_\n_"broaster x4"_\n_"bandeja mixta"_\n\nO escribe *menu* para ver todo 📋`)
+      await sendMessage(jid, `No entendí. Escribe el *número* del producto o escribe *listo* para continuar 👇`)
     }
     return
   }
 
-  if (session.state === STATES.ESPERANDO_DIRECCION) {
-    setSession(jid, { state: STATES.ESPERANDO_PAGO, pedido: { ...session.pedido, direccion: texto.trim() } })
-    await sendMessage(jid, `¿Cómo vas a pagar? 💳\n\n1️⃣ Nequi\n2️⃣ Transferencia\n3️⃣ Efectivo (contra entrega)`)
+  if (s.step === 'nombre') {
+    s.nombre = txt
+    s.step = 'direccion'
+    await sendMessage(jid, `Mucho gusto *${txt}* 😊\n\n¿Cuál es tu dirección de entrega? 🏠\n(Incluye barrio y ciudad)`)
     return
   }
 
-  if (session.state === STATES.ESPERANDO_PAGO) {
-    let pago = texto.trim()
-    if (t === '1' || t.includes('nequi')) {
-      pago = 'Nequi'
-      setSession(jid, { state: STATES.ESPERANDO_COMPROBANTE, pedido: { ...session.pedido, pago } })
-      await sendMessage(jid, `💚 *Pago por Nequi*\n\nNúmero Nequi: *310 467 2816*\nNombre: *Ala Bendita Chicken*\n\n💰 *Total a pagar: $${session.pedido.items.reduce((a, b) => a + b.precio, 0).toLocaleString('es-CO')}*\n\nPor favor realiza el pago y envíanos el *comprobante* 📸`)
-    } else if (t === '2' || t.includes('transfer')) {
-      pago = 'Transferencia'
-      setSession(jid, { state: STATES.ESPERANDO_COMPROBANTE, pedido: { ...session.pedido, pago } })
-      await sendMessage(jid, `🏦 *Pago por Transferencia*\n\nBanco: *Bancolombia*\nCuenta: *123-456789-00*\nNombre: *Ala Bendita Chicken*\n\n💰 *Total a pagar: $${session.pedido.items.reduce((a, b) => a + b.precio, 0).toLocaleString('es-CO')}*\n\nPor favor realiza el pago y envíanos el *comprobante* 📸`)
-    } else if (t === '3' || t.includes('efectivo') || t.includes('contra')) {
-      pago = 'Efectivo (contra entrega)'
-      setSession(jid, { state: STATES.MENU, pedido: { items: [], nombre: '', direccion: '', pago: '' } })
-      const comanda = generarComanda(jid)
-      await sendMessage(jid, `🎉 *¡Pedido confirmado ${session.pedido.nombre}!*\n\n${comanda}\n\n🛵 Tu pedido está en preparación. ¡Gracias! 🍗`)
-      for (const num of owners) await sendMessage(`${num.trim()}@s.whatsapp.net`, `🔔 *NUEVO PEDIDO*\n\n${comanda}`)
+  if (s.step === 'direccion') {
+    s.direccion = txt
+    s.step = 'pago'
+    await sendMessage(jid, `Dirección anotada ✅\n\n¿Cómo vas a pagar?\n\n💵 *Efectivo*\n📱 *Nequi*\n🏦 *Transferencia*`)
+    return
+  }
+
+  if (s.step === 'pago') {
+    s.pago = txt
+    s.step = 'confirmacion'
+
+    const total = s.pedido.reduce((acc, p) => acc + p.precio, 0)
+    const resumen = s.pedido.map(p => `• ${p.nombre} — ${fmt(p.precio)}`).join('\n')
+
+    const resumenMsg = `📋 *RESUMEN DE TU PEDIDO*\n\n${resumen}\n🥫 Salsa: ${s.salsa}\n\n💰 *TOTAL: ${fmt(total)}*\n\n📍 Dirección: ${s.direccion}\n💳 Pago: ${s.pago}\n\n¿Confirmas tu pedido? Escribe *sí* o *no* 👇`
+
+    await sendMessage(jid, resumenMsg)
+    return
+  }
+
+  if (s.step === 'confirmacion') {
+    if (lower === 'si' || lower === 'sí' || lower === 'confirmo' || lower === 'ok' || lower === 'dale') {
+      const total = s.pedido.reduce((acc, p) => acc + p.precio, 0)
+      const resumen = s.pedido.map(p => `• ${p.nombre} — ${fmt(p.precio)}`).join('\n')
+
+      // Mensaje al cliente
+      await sendMessage(jid, `✅ *¡Pedido confirmado!*\n\n🍗 Tu pedido está en preparación.\n⏱️ Tiempo estimado: 30-45 minutos\n\n¡Gracias por elegir *Ala Bendita Chicken*! 🙏`)
+
+      // Comanda al asesor
+      const comanda = `🔔 *NUEVO PEDIDO - ALA BENDITA*\n\n👤 Cliente: ${s.nombre}\n📱 WhatsApp: ${jid.replace('@s.whatsapp.net','')}\n\n📋 *PEDIDO:*\n${resumen}\n🥫 Salsa: ${s.salsa}\n\n💰 *TOTAL: ${fmt(total)}*\n📍 Dirección: ${s.direccion}\n💳 Pago: ${s.pago}`
+      await sendMessage(ASESOR, comanda)
+
+      sessions.delete(jid)
+    } else if (lower === 'no') {
+      sessions.set(jid, { step: 'menu', pedido: [], nombre: '', direccion: '', pago: '', salsa: '' })
+      await sendMessage(jid, `Pedido cancelado. Escribe *menú* cuando quieras volver a pedir 😊`)
     } else {
-      await sendMessage(jid, `Responde *1* Nequi, *2* Transferencia o *3* Efectivo 💳`)
+      await sendMessage(jid, `Por favor escribe *sí* para confirmar o *no* para cancelar 👇`)
     }
     return
   }
-
-  if (session.state === STATES.ESPERANDO_COMPROBANTE) {
-    if (hasMedia) {
-      const comanda = generarComanda(jid)
-      setSession(jid, { state: STATES.MENU, pedido: { items: [], nombre: '', direccion: '', pago: '' } })
-      await sendMessage(jid, `✅ *¡Comprobante recibido ${session.pedido.nombre}!*\n\n${comanda}\n\n🛵 Tu pedido está confirmado y en preparación. ¡Gracias! 🍗`)
-      for (const num of owners) await sendMessage(`${num.trim()}@s.whatsapp.net`, `🔔 *NUEVO PEDIDO PAGADO*\n\n${comanda}\n\n📸 Comprobante recibido`)
-    } else {
-      await sendMessage(jid, `📸 Por favor envía el *pantallazo del comprobante* de pago para confirmar tu pedido.`)
-    }
-    return
-  }
-
-  // ASESOR
-  if (t === '3' || t.includes('asesor') || t.includes('humano') || t.includes('hablar con')) {
-    await sendMessage(jid, `👤 Te conectamos con un asesor ahora mismo.\nUn momento por favor... ⏳`)
-    for (const num of owners) await sendMessage(`${num.trim()}@s.whatsapp.net`, `⚠️ *Cliente necesita asesor*\nNúmero: ${jid.replace('@s.whatsapp.net', '')}\nMensaje: ${texto}`)
-    return
-  }
-
-  // MENU OPCIONES
-  if (t === '1' || t === 'menu' || t === 'menú' || t.includes('ver menu') || t.includes('carta') || t.includes('que tienen')) {
-    await sendMessage(jid, MENU_MSG)
-    await sendMessage(jid, `¿Deseas hacer un pedido? Escribe *2* 🍗`)
-    return
-  }
-
-  if (t === '2' || t === 'pedir' || t.includes('quiero pedir') || t.includes('hacer pedido') || t.includes('ordenar')) {
-    setSession(jid, { state: STATES.ESPERANDO_NOMBRE, pedido: { items: [], nombre: '', direccion: '', pago: '' } })
-    await sendMessage(jid, `¡Perfecto! Vamos a armar tu pedido 🍗\n\n¿Cuál es tu nombre?`)
-    return
-  }
-
-  if (t === '4' || t.includes('zona') || t.includes('barrio') || t.includes('horario') || t.includes('domicilio') || t.includes('pago')) {
-    await sendMessage(jid, `ℹ️ *INFORMACIÓN ALA BENDITA CHICKEN*\n\n📍 *Zonas de entrega:*\nPoblado, Villanueva, Calimio, Mojica, Cañaveralejo, El Retiro, Guabal, Manrique, Sardi y más del sur de Cali.\n\n⏰ *Horario:*\nTodos los días 4:00pm - 11:00pm\n\n💳 *Formas de pago:*\nEfectivo, Nequi, Transferencias\n\n🛵 Domicilio GRATIS\n\n📞 310 467 2816 | 321 853 4946`)
-    return
-  }
-
-  // SALUDO - BIENVENIDA
-  const esSaludo = ['hola', 'buenas', 'buenos', 'hi', 'hey', 'inicio', 'start'].some(s => t.includes(s))
-  if (esSaludo) {
-    setSession(jid, { state: STATES.MENU, pedido: { items: [], nombre: '', direccion: '', pago: '' } })
-    await sendMessage(jid, BIENVENIDA)
-    return
-  }
-
-  await sendMessage(jid, BIENVENIDA)
 }
 
-// RUTAS
-app.get('/', async (req, res) => {
-  const { status } = getStatus()
-  res.send(`<html><head><title>Ala Bendita Bot</title><meta http-equiv="refresh" content="5"><style>body{font-family:sans-serif;text-align:center;padding:40px;background:#fff6ee}h1{color:#D42B14}.status{padding:12px 24px;border-radius:20px;display:inline-block;font-weight:bold}.connected{background:#d4edda;color:#155724}.disconnected{background:#fff3cd;color:#856404}</style></head><body><h1>🍗 Ala Bendita Chicken Bot</h1><p class="status ${status === 'connected' ? 'connected' : 'disconnected'}">${status === 'connected' ? '✅ Conectado' : status === 'qr_ready' ? '📱 Escanea el QR en /qr' : '⏳ Conectando...'}</p>${status !== 'connected' ? '<p><a href="/qr">👉 Ver código QR</a></p>' : ''}</body></html>`)
+// Rutas Express
+app.get('/', (req, res) => {
+  const s = getStatus()
+  res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:40px">
+    <h1>🍗 Ala Bendita Bot</h1>
+    <p>Estado: <b>${s.status}</b></p>
+    ${s.status !== 'connected' ? '<p><a href="/qr">Ver QR para conectar</a></p>' : '<p style="color:green">✅ Conectado y funcionando</p>'}
+  </body></html>`)
 })
 
 app.get('/qr', async (req, res) => {
-  const { status, qr } = getStatus()
-  if (status === 'connected') return res.send('<h2 style="font-family:sans-serif;color:green;text-align:center">✅ Ya conectado</h2>')
-  if (!qr) return res.send('<h2 style="font-family:sans-serif;text-align:center">⏳ Generando QR... recarga en 5 seg</h2><meta http-equiv="refresh" content="5">')
-  const img = await QRCode.toDataURL(qr, { width: 300 })
-  res.send(`<html><head><title>QR</title><meta http-equiv="refresh" content="30"></head><body style="font-family:sans-serif;text-align:center;padding:40px"><h2>📱 Escanea con WhatsApp</h2><img src="${img}" style="border:4px solid #D42B14;border-radius:12px"/></body></html>`)
+  const s = getStatus()
+  if (s.status === 'connected') {
+    return res.send('<html><body style="font-family:sans-serif;text-align:center;padding:40px"><h1>✅ Bot ya conectado</h1></body></html>')
+  }
+  if (!s.qr) {
+    return res.send('<html><body style="font-family:sans-serif;text-align:center;padding:40px"><h1>⏳ Generando QR...</h1><p>Espera 10 segundos y recarga</p><script>setTimeout(()=>location.reload(),5000)</script></body></html>')
+  }
+  const qrImg = await QRCode.toDataURL(s.qr)
+  res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:40px">
+    <h1>📱 Escanea con WhatsApp</h1>
+    <img src="${qrImg}" style="width:300px;height:300px"/>
+    <p>Abre WhatsApp → tres puntos → Dispositivos vinculados → Vincular dispositivo</p>
+    <script>setTimeout(()=>location.reload(),30000)</script>
+  </body></html>`)
 })
 
-app.get('/health', (req, res) => res.json({ ok: true, status: getStatus().status }))
+app.get('/status', (req, res) => res.json(getStatus()))
 
 const PORT = process.env.PORT || 3000
 app.listen(PORT, async () => {
-  console.log(`🍗 Ala Bendita Chicken Bot corriendo en puerto ${PORT}`)
+  console.log(`🚀 Servidor corriendo en puerto ${PORT}`)
   setMessageHandler(handleMessage)
   await connectToWhatsApp()
 })
