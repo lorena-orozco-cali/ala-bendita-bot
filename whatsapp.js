@@ -87,7 +87,7 @@ async function connectToWhatsApp() {
       if (qr) {
         currentQR = qr
         connectionStatus = 'qr_ready'
-        console.log('📱 QR listo')
+        console.log('📱 QR listo — ve a /qr para escanearlo')
       }
       if (connection === 'close') {
         const shouldReconnect = (lastDisconnect?.error instanceof Boom)
@@ -113,17 +113,18 @@ async function connectToWhatsApp() {
           || msg.message?.extendedTextMessage?.text
           || msg.message?.imageMessage?.caption
           || ''
-        const hasMedia = !!(msg.message?.imageMessage || msg.message?.documentMessage)
+        const hasMedia = !!msg.message?.imageMessage
         try {
           if (messageHandler) await messageHandler(jid, texto, hasMedia)
-        } catch (e) {
-          console.error('Error mensaje:', e.message)
+        } catch(e) {
+          console.error('Error procesando mensaje:', e.message)
         }
       }
     })
+
   } catch(e) {
-    console.log('Error conectando:', e.message, e.stack)
-    setTimeout(connectToWhatsApp, 5000)
+    console.error('Error conectando:', e.message)
+    setTimeout(connectToWhatsApp, 10000)
   }
 }
 
@@ -131,8 +132,8 @@ async function sendMessage(jid, text) {
   if (!sock) return
   try {
     await sock.sendMessage(jid, { text })
-  } catch (e) {
-    console.error('Error enviando:', e.message)
+  } catch(e) {
+    console.error('Error enviando mensaje:', e.message)
   }
 }
 
